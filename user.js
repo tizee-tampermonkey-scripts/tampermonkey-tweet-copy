@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         X Tweet Copy
 // @namespace    https://github.com/tizee/tempermonkey-tweet-copy
-// @version      1.0
+// @version      1.1
 // @description  Adds a "Copy" button to each tweet that copies the tweet text along with its URL and shows a check mark animation upon success.
 // @author       tizee
 // @downloadURL  https://raw.githubusercontent.com/tizee/tempermonkey-tweet-copy/main/user.js
@@ -16,9 +16,7 @@
     'use strict';
 
     // Define SVG constants for the copy icon and the check mark.
-    const ORIGINAL_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentcolor">
-      <path d="M6.9998 6V3C6.9998 2.44772 7.44752 2 7.9998 2H19.9998C20.5521 2 20.9998 2.44772 20.9998 3V17C20.9998 17.5523 20.5521 18 19.9998 18H16.9998V20.9991C16.9998 21.5519 16.5499 22 15.993 22H4.00666C3.45059 22 3 21.5554 3 20.9991L3.0026 7.00087C3.0027 6.44811 3.45264 6 4.00942 6H6.9998ZM5.00242 8L5.00019 20H14.9998V8H5.00242ZM8.9998 6H16.9998V16H18.9998V4H8.9998V6Z"></path>
-    </svg>`;
+    const ORIGINAL_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><g><path d="M19.5 2C20.88 2 22 3.12 22 4.5v11c0 1.21-.86 2.22-2 2.45V4.5c0-.28-.22-.5-.5-.5H6.05c.23-1.14 1.24-2 2.45-2h11zm-4 4C16.88 6 18 7.12 18 8.5v11c0 1.38-1.12 2.5-2.5 2.5h-11C3.12 22 2 20.88 2 19.5v-11C2 7.12 3.12 6 4.5 6h11zM4 19.5c0 .28.22.5.5.5h11c.28 0 .5-.22.5-.5v-11c0-.28-.22-.5-.5-.5h-11c-.28 0-.5.22-.5.5v11z"></path></g></svg>`;
     const CHECKMARK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
       <path d="M9.9997 15.1709L19.1921 5.97852L20.6063 7.39273L9.9997 17.9993L3.63574 11.6354L5.04996 10.2212L9.9997 15.1709Z"></path>
     </svg>`;
