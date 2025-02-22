@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         X Tweet Copy
 // @namespace    https://github.com/tizee/tempermonkey-tweet-copy
-// @version      1.1
-// @description  Adds a "Copy" button to each tweet that copies the tweet text along with its URL and shows a check mark animation upon success.
+// @version      1.2
+// @description  Adds a "Copy" button to each tweet that copies the tweet text along with its URL and shows a check mark animation upon success, preserving link URLs and styling.
 // @author       tizee
 // @downloadURL  https://raw.githubusercontent.com/tizee/tempermonkey-tweet-copy/main/user.js
 // @updateURL    https://raw.githubusercontent.com/tizee/tempermonkey-tweet-copy/main/user.js
@@ -16,7 +16,7 @@
     'use strict';
 
     // Define SVG constants for the copy icon and the check mark.
-    const ORIGINAL_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><g><path d="M19.5 2C20.88 2 22 3.12 22 4.5v11c0 1.21-.86 2.22-2 2.45V4.5c0-.28-.22-.5-.5-.5H6.05c.23-1.14 1.24-2 2.45-2h11zm-4 4C16.88 6 18 7.12 18 8.5v11c0 1.38-1.12 2.5-2.5 2.5h-11C3.12 22 2 20.88 2 19.5v-11C2 7.12 3.12 6 4.5 6h11zM4 19.5c0 .28.22.5.5.5h11c.28 0 .5-.22.5-.5v-11c0-.28-.22-.5-.5-.5h-11c-.28 0-.5.22-.5.5v11z"></path></g></svg>`;
+    const ORIGINAL_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><g><path d="M19.5 2C20.88 2 22 3.12 22 4.5v11c0 1.21-.86 2.22-2 2.45V4.5c0-.28-.22-.5-.5-.5H6.05c.23-1.14 1.24-2 2.45-2h11zm-4 4C16.88 6 18 7.12 18 8.5v11c0 1.38-1.12 2.5-2.5 2.5h-11C3.12 22 2 20.88 2 19.5v-11C2 7.12 3.12 6 4.5 6h11zM4 19.5c0 .28.22.5.5.5h11c.28 0 .5-.22.5-.5v-11c0-.28-.22-.5-.5-.5h-11c-.28 0-.5.22-.5.5v11z"></path></g></svg>`;
     const CHECKMARK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
       <path d="M9.9997 15.1709L19.1921 5.97852L20.6063 7.39273L9.9997 17.9993L3.63574 11.6354L5.04996 10.2212L9.9997 15.1709Z"></path>
     </svg>`;
@@ -64,7 +64,7 @@
 
     /**
      * Creates and appends a copy button to the button group element.
-     * The button, when clicked, copies the tweet text and tweet URL.
+     * The button, when clicked, copies the tweet content with styling and tweet URL.
      * @param {HTMLElement} groupEl - The container for tweet action buttons.
      */
     function addCopyButtonToGroup(groupEl) {
@@ -86,22 +86,51 @@
             // Prevent event propagation.
             e.stopPropagation();
 
-            // Extract tweet text from elements with data-testid="tweetText".
+            // Extract tweet text elements.
             const textElements = tweetContainer.querySelectorAll('[data-testid="tweetText"]');
-            const tweetText = Array.from(textElements)
-                .map(el => el.innerText)
-                .join('\n');
 
-            // Attempt to retrieve the tweet URL.
+            // Process each tweet text element to preserve styling and update links.
+            const tweetContent = Array.from(textElements).map(el => {
+                const clone = el.cloneNode(true);
+                // Replace each anchor's visible text with its full URL.
+                clone.querySelectorAll('a').forEach(a => {
+                    if (a.href) {
+                        a.textContent = a.href;
+                    }
+                });
+                return {
+                    html: clone.innerHTML,
+                    text: clone.innerText
+                };
+            });
+
+            // Combine processed content with line breaks.
+            const tweetHTML = tweetContent.map(obj => obj.html).join('<br><br>');
+            const tweetPlainText = tweetContent.map(obj => obj.text).join('\n\n');
+
+            // Retrieve the tweet URL.
             let tweetUrl = '';
             const linkEl = tweetContainer.querySelector('a[href*="/status/"]');
             if (linkEl && linkEl.href) {
                 tweetUrl = linkEl.href;
             }
 
-            // Append the tweet URL to the copied content.
-            const copyContent = `${tweetText}\n\nTweet URL: ${tweetUrl}`;
-            navigator.clipboard.writeText(copyContent)
+            // Append tweet URL to the content.
+            const copyHTML = `${tweetHTML}<br><br><strong>Tweet URL:</strong> <a href="${tweetUrl}">${tweetUrl}</a>`;
+            const copyText = `${tweetPlainText}\n\nTweet URL: ${tweetUrl}`;
+
+            // Create Blob items for HTML and plain text.
+            const blobHTML = new Blob([copyHTML], { type: 'text/html' });
+            const blobText = new Blob([copyText], { type: 'text/plain' });
+
+            // Create a ClipboardItem with both formats.
+            const clipboardItem = new ClipboardItem({
+                'text/html': blobHTML,
+                'text/plain': blobText,
+            });
+
+            // Write both formats to the clipboard.
+            navigator.clipboard.write([clipboardItem])
                 .then(() => {
                     // Show check mark animation on successful copy.
                     copyBtn.innerHTML = CHECKMARK_SVG;
