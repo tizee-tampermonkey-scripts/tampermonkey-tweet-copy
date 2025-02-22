@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         X Tweet Copy
-// @namespace    https://github.com/tizee/tempermonkey-tweet-copy
-// @version      1.2
+// @namespace    https://github.com/tizee-tampermonkey-scripts/tampermonkey-tweet-copy
+// @version      1.2.1
 // @description  Adds a "Copy" button to each tweet that copies the tweet text along with its URL and shows a check mark animation upon success, preserving link URLs and styling.
 // @author       tizee
-// @downloadURL  https://raw.githubusercontent.com/tizee/tempermonkey-tweet-copy/main/user.js
-// @updateURL    https://raw.githubusercontent.com/tizee/tempermonkey-tweet-copy/main/user.js
+// @downloadURL  https://raw.githubusercontent.com/tizee-tampermonkey-scripts/tampermonkey-tweet-copy/main/user.js
+// @updateURL    https://raw.githubusercontent.com/tizee-tampermonkey-scripts/tampermonkey-tweet-copy/main/user.js
 // @match        https://x.com/*
 // @grant        GM_addStyle
 // @run-at       document-end
