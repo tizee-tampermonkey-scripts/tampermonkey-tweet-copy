@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         X Tweet Copy
 // @namespace    https://github.com/tizee-tampermonkey-scripts/tampermonkey-tweet-copy
-// @version      1.2.3
-// @description  Adds a "Copy" button to each tweet and article that copies the content along with its URL and shows a check mark animation upon success, preserving link URLs and styling.
+// @version      1.2.4
+// @description  Adds a "Copy" button to each tweet and article that copies the content along with its URL and shows a check mark animation upon success, preserving link URLs and styling. Quoted tweets are labeled separately instead of being merged with the main tweet.
 // @author       tizee
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=x.com
 // @downloadURL  https://raw.githubusercontent.com/tizee-tampermonkey-scripts/tampermonkey-tweet-copy/refs/heads/main/user.js
@@ -74,6 +74,52 @@
         const hasTitle = container.querySelector('[data-testid="twitter-article-title"]') !== null;
         const hasContent = container.querySelector('[data-testid="longformRichTextComponent"] > [data-contents="true"]') !== null;
         return hasTitle && hasContent;
+    }
+
+    /**
+     * Finds the quoted tweet card inside a tweet container.
+     * X renders a quoted tweet as a clickable card (div[role="link"]) nested
+     * inside the main article, containing its own author (User-Name) and text.
+     * @param {HTMLElement} container - The tweet container.
+     * @returns {HTMLElement|null} The quoted tweet card or null if none.
+     */
+    function findQuotedTweetCard(container) {
+        const candidates = container.querySelectorAll('div[role="link"]');
+        for (const el of candidates) {
+            // Discriminate quote cards from media/link-preview cards by the
+            // presence of nested tweet author/text markers.
+            if (el.querySelector('[data-testid="tweetText"], [data-testid="User-Name"]')) {
+                return el;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Extracts the @handle from a User-Name element's text.
+     * @param {HTMLElement|null} userNameEl - The User-Name element.
+     * @returns {string} The @handle (e.g. "@hosseeb") or empty string.
+     */
+    function extractHandle(userNameEl) {
+        if (!userNameEl) return '';
+        const match = (userNameEl.innerText || '').match(/@[A-Za-z0-9_]+/);
+        return match ? match[0] : '';
+    }
+
+    /**
+     * Clones tweetText elements and rewrites anchors to their full URLs,
+     * returning both HTML and plain-text representations.
+     * @param {HTMLElement[]} elements - tweetText elements to process.
+     * @returns {{html: string, text: string}[]}
+     */
+    function processTextElements(elements) {
+        return elements.map(el => {
+            const clone = el.cloneNode(true);
+            clone.querySelectorAll('a').forEach(a => {
+                if (a.href) a.textContent = a.href;
+            });
+            return { html: clone.innerHTML, text: clone.innerText };
+        });
     }
 
     /**
@@ -186,40 +232,62 @@
             }
 
             // Handle regular tweet content
-            // Extract tweet text elements.
-            const textElements = tweetContainer.querySelectorAll('[data-testid="tweetText"]');
+            // Detect a quoted tweet card so its content can be kept separate
+            // from the main tweet instead of being merged together.
+            const quoteCard = findQuotedTweetCard(tweetContainer);
 
-            console.debug('[Tweet Copy] textElements:', textElements);
+            // Split tweetText elements into the main tweet and the quoted tweet.
+            const allTextElements = Array.from(tweetContainer.querySelectorAll('[data-testid="tweetText"]'));
+            const mainTextElements = allTextElements.filter(el => !quoteCard || !quoteCard.contains(el));
+            const quotedTextElements = quoteCard ? allTextElements.filter(el => quoteCard.contains(el)) : [];
 
-            // Process each tweet text element to preserve styling and update links.
-            const tweetContent = Array.from(textElements).map(el => {
-                const clone = el.cloneNode(true);
-                // Replace each anchor's visible text with its full URL.
-                clone.querySelectorAll('a').forEach(a => {
-                    if (a.href) {
-                        a.textContent = a.href;
-                    }
-                });
-                return {
-                    html: clone.innerHTML,
-                    text: clone.innerText
-                };
-            });
+            console.debug('[Tweet Copy] main:', mainTextElements.length, 'quoted:', quotedTextElements.length);
 
-            // Combine processed content with line breaks.
-            const tweetHTML = tweetContent.map(obj => obj.html).join('<br><br>');
-            const tweetPlainText = tweetContent.map(obj => obj.text).join('\n\n');
+            // Process the main tweet content.
+            const mainContent = processTextElements(mainTextElements);
+            const mainHTML = mainContent.map(obj => obj.html).join('<br><br>');
+            const mainText = mainContent.map(obj => obj.text).join('\n\n');
 
-            // Retrieve the tweet URL.
+            // Retrieve the main tweet URL. The first status link belongs to the
+            // main tweet; quoted cards do not expose a status anchor.
             let tweetUrl = '';
             const linkEl = tweetContainer.querySelector('a[href*="/status/"]');
             if (linkEl && linkEl.href) {
                 tweetUrl = linkEl.href;
             }
 
-            // Append tweet URL to the content and wrap in markdown backticks.
-            const copyHTML = `<pre><code>${tweetHTML}</code></pre><br><br><strong>Tweet URL:</strong> <a href="${tweetUrl}">${tweetUrl}</a>`;
-            const copyText = `\`\`\`\n${tweetPlainText}\n\`\`\`\n\nTweet URL: ${tweetUrl}`;
+            // Build the base payload for the main tweet.
+            let copyHTML = `<pre><code>${mainHTML}</code></pre>`;
+            let copyText = `\`\`\`\n${mainText}\n\`\`\``;
+
+            // Append the quoted tweet as a clearly labeled, separate block.
+            if (quoteCard && quotedTextElements.length) {
+                const quotedContent = processTextElements(quotedTextElements);
+                const quotedHTML = quotedContent.map(obj => obj.html).join('<br><br>');
+                const quotedText = quotedContent.map(obj => obj.text).join('\n\n');
+
+                const quotedHandle = extractHandle(quoteCard.querySelector('[data-testid="User-Name"]'));
+                const quotedLabel = quotedHandle ? `Quoted tweet from ${quotedHandle}` : 'Quoted tweet';
+
+                // Include the quoted status URL only if X exposes it in the DOM.
+                let quotedUrl = '';
+                const quotedLink = quoteCard.querySelector('a[href*="/status/"]');
+                if (quotedLink && quotedLink.href) {
+                    quotedUrl = quotedLink.href;
+                }
+
+                copyHTML += `<br><br><strong>${quotedLabel}:</strong><blockquote>${quotedHTML}</blockquote>`;
+                copyText += `\n\n${quotedLabel}:\n${quotedText.split('\n').map(line => `> ${line}`).join('\n')}`;
+
+                if (quotedUrl) {
+                    copyHTML += `<strong>Quoted URL:</strong> <a href="${quotedUrl}">${quotedUrl}</a>`;
+                    copyText += `\n>\n> Quoted URL: ${quotedUrl}`;
+                }
+            }
+
+            // Append the main tweet URL.
+            copyHTML += `<br><br><strong>Tweet URL:</strong> <a href="${tweetUrl}">${tweetUrl}</a>`;
+            copyText += `\n\nTweet URL: ${tweetUrl}`;
 
             // Create Blob items for HTML and plain text.
             const blobHTML = new Blob([copyHTML], { type: 'text/html' });
