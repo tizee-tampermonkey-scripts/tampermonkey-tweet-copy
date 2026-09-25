@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         X Tweet Copy
 // @namespace    https://github.com/tizee-tampermonkey-scripts/tampermonkey-tweet-copy
-// @version      1.2.4
+// @version      1.2.5
 // @description  Adds a "Copy" button to each tweet and article that copies the content along with its URL and shows a check mark animation upon success, preserving link URLs and styling. Quoted tweets are labeled separately instead of being merged with the main tweet.
 // @author       tizee
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=x.com
@@ -107,6 +107,37 @@
     }
 
     /**
+     * Resolves the URL an anchor points to. External links on X use t.co
+     * redirects as href, but the full destination URL is kept in the anchor's
+     * text (partly in hidden spans, with a trailing ellipsis).
+     * @param {HTMLAnchorElement} a - The anchor element.
+     * @returns {string} The best available URL.
+     */
+    function resolveAnchorUrl(a) {
+        if (a.hostname === 't.co') {
+            const text = a.textContent.trim().replace(/…$/, '');
+            if (/^https?:\/\//.test(text)) return text;
+        }
+        return a.href;
+    }
+
+    /**
+     * Finds the link-preview card URL of the main tweet. X hides a trailing
+     * URL from the tweet text when it is rendered as a card, so the link only
+     * exists in the card.
+     * @param {HTMLElement} container - The tweet container.
+     * @param {HTMLElement|null} quoteCard - The quoted tweet card to exclude.
+     * @returns {string} The card URL (usually t.co) or empty string.
+     */
+    function findCardUrl(container, quoteCard) {
+        const anchors = container.querySelectorAll('[data-testid="card.wrapper"] a[href]');
+        for (const a of anchors) {
+            if (!quoteCard || !quoteCard.contains(a)) return a.href;
+        }
+        return '';
+    }
+
+    /**
      * Clones tweetText elements and rewrites anchors to their full URLs,
      * returning both HTML and plain-text representations.
      * @param {HTMLElement[]} elements - tweetText elements to process.
@@ -116,7 +147,7 @@
         return elements.map(el => {
             const clone = el.cloneNode(true);
             clone.querySelectorAll('a').forEach(a => {
-                if (a.href) a.textContent = a.href;
+                if (a.href) a.textContent = resolveAnchorUrl(a);
             });
             return { html: clone.innerHTML, text: clone.innerText };
         });
@@ -169,7 +200,7 @@
                     // Replace each anchor's visible text with its full URL.
                     contentClone.querySelectorAll('a').forEach(a => {
                         if (a.href) {
-                            a.textContent = a.href;
+                            a.textContent = resolveAnchorUrl(a);
                         }
                     });
 
@@ -245,8 +276,18 @@
 
             // Process the main tweet content.
             const mainContent = processTextElements(mainTextElements);
-            const mainHTML = mainContent.map(obj => obj.html).join('<br><br>');
-            const mainText = mainContent.map(obj => obj.text).join('\n\n');
+            let mainHTML = mainContent.map(obj => obj.html).join('<br><br>');
+            let mainText = mainContent.map(obj => obj.text).join('\n\n');
+
+            // Restore the card link that X strips from the tweet text, unless
+            // the same link is already present in the text.
+            const cardUrl = findCardUrl(tweetContainer, quoteCard);
+            const cardInText = mainTextElements.some(el =>
+                Array.from(el.querySelectorAll('a')).some(a => a.href === cardUrl));
+            if (cardUrl && !cardInText) {
+                mainHTML += `<br><br><a href="${cardUrl}">${cardUrl}</a>`;
+                mainText += `\n\n${cardUrl}`;
+            }
 
             // Retrieve the main tweet URL. The first status link belongs to the
             // main tweet; quoted cards do not expose a status anchor.
