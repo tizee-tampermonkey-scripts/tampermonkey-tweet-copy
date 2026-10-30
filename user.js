@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         X Tweet Copy
 // @namespace    https://github.com/tizee-tampermonkey-scripts/tampermonkey-tweet-copy
-// @version      1.2.6
+// @version      1.2.7
 // @description  Adds a "Copy" button to each tweet and article that copies the content along with its URL and shows a check mark animation upon success, preserving link URLs and styling. Quoted tweets are labeled separately instead of being merged with the main tweet.
 // @author       tizee
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=x.com
@@ -9,6 +9,7 @@
 // @updateURL    https://raw.githubusercontent.com/tizee-tampermonkey-scripts/tampermonkey-tweet-copy/refs/heads/main/user.js
 // @match        https://x.com/*
 // @grant        GM_addStyle
+// @sandbox      JavaScript
 // @run-at       document-end
 // @license      MIT
 // ==/UserScript==
@@ -187,6 +188,81 @@
     }
 
     /**
+     * Normalizes an X/Twitter URL or path to https://x.com. Returns empty
+     * string for anything that is not an X/Twitter link.
+     * @param {string} value - Absolute URL or root-relative path.
+     * @returns {string}
+     */
+    function toXUrl(value) {
+        if (typeof value !== 'string' || !value) return '';
+        let url;
+        try {
+            url = new URL(value, 'https://x.com');
+        } catch {
+            return '';
+        }
+        if (!/(^|\.)(x|twitter)\.com$/.test(url.hostname)) return '';
+        return `https://x.com${url.pathname}${url.search}`;
+    }
+
+    /**
+     * Builds a status URL from a tweet object found in React props.
+     * @param {object} tweet - Tweet entity (legacy shape: id_str, user.screen_name).
+     * @returns {string}
+     */
+    function tweetObjectUrl(tweet) {
+        const handle = tweet.user?.screen_name || tweet.core?.user_results?.result?.legacy?.screen_name || 'i';
+        return `https://x.com/${handle}/status/${tweet.id_str}`;
+    }
+
+    /**
+     * Resolves the quoted status URL. The quote card is a div[role="link"]
+     * that navigates via JS, so the URL is not in the DOM. Read X's React
+     * props instead: walk up the fiber tree from the card. The card's own
+     * `link` prop is the navigation target used on click. The first `tweet`
+     * prop is the quoted tweet (or, if the walk reaches the main tweet first,
+     * the main tweet with quote metadata).
+     * @param {HTMLElement} quoteCard - The quote card.
+     * @param {string} mainUrl - The main tweet URL, used to tell the two apart.
+     * @returns {string} The quoted URL or empty string.
+     */
+    function findQuotedUrl(quoteCard, mainUrl) {
+        const link = quoteCard.querySelector('a[href*="/status/"]');
+        if (link) return link.href;
+
+        const fiberKey = Object.keys(quoteCard).find(k =>
+            k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$'));
+        if (!fiberKey) {
+            console.warn('[Tweet Copy] React fiber not reachable; check that the script runs in page context (@sandbox JavaScript).');
+            return '';
+        }
+
+        const mainId = (mainUrl.match(/\/status\/(\d+)/) || [])[1];
+        for (let fiber = quoteCard[fiberKey], depth = 0; fiber && depth < 50; fiber = fiber.return, depth++) {
+            const props = fiber.memoizedProps;
+            const link = props?.link;
+            const linkUrl = toXUrl(typeof link === 'string' ? link : link?.pathname);
+            if (linkUrl) return linkUrl;
+
+            const tweet = props?.tweet;
+            if (!tweet?.id_str) continue;
+
+            if (tweet.id_str !== mainId) return tweetObjectUrl(tweet);
+
+            // Reached the main tweet: read its quote metadata.
+            const q = tweet.quoted_status;
+            if (q && typeof q === 'object' && q.id_str) return tweetObjectUrl(q);
+            const permalink = toXUrl(tweet.quoted_status_permalink?.expanded);
+            if (permalink) return permalink;
+            const qid = tweet.quoted_status_id_str || (typeof q === 'string' ? q : '');
+            if (qid) return `https://x.com/i/status/${qid}`;
+            break;
+        }
+        console.warn('[Tweet Copy] Quoted URL not found in React props.');
+        return '';
+    }
+
+    /**
      * Creates and appends a copy button to the button group element.
      * The button, when clicked, copies the tweet content with styling and tweet URL.
      * @param {HTMLElement} groupEl - The container for tweet action buttons.
@@ -337,26 +413,20 @@
             // Append the quoted tweet or article as a clearly labeled, separate block.
             const quoted = quoteCard ? extractQuotedContent(quoteCard, quotedTextElements) : null;
             if (quoted) {
-                const quotedHTML = quoted.html;
-                const quotedText = quoted.text;
+                let quotedHTML = quoted.html;
+                let quotedText = quoted.text;
 
                 const quotedHandle = extractHandle(quoteCard.querySelector('[data-testid="User-Name"]'));
                 const quotedLabel = quotedHandle ? `Quoted ${quoted.kind} from ${quotedHandle}` : `Quoted ${quoted.kind}`;
 
-                // Include the quoted status URL only if X exposes it in the DOM.
-                let quotedUrl = '';
-                const quotedLink = quoteCard.querySelector('a[href*="/status/"]');
-                if (quotedLink && quotedLink.href) {
-                    quotedUrl = quotedLink.href;
+                const quotedUrl = findQuotedUrl(quoteCard, tweetUrl);
+                if (quotedUrl) {
+                    quotedHTML += `<br><br><strong>Quoted URL:</strong> <a href="${quotedUrl}">${quotedUrl}</a>`;
+                    quotedText += `\n\nQuoted URL: ${quotedUrl}`;
                 }
 
                 copyHTML += `<br><br><strong>${quotedLabel}:</strong><blockquote>${quotedHTML}</blockquote>`;
                 copyText += `\n\n${quotedLabel}:\n${quotedText.split('\n').map(line => `> ${line}`).join('\n')}`;
-
-                if (quotedUrl) {
-                    copyHTML += `<strong>Quoted URL:</strong> <a href="${quotedUrl}">${quotedUrl}</a>`;
-                    copyText += `\n>\n> Quoted URL: ${quotedUrl}`;
-                }
             }
 
             // Append the main tweet URL.
