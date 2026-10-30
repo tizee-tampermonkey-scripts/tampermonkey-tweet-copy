@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         X Tweet Copy
 // @namespace    https://github.com/tizee-tampermonkey-scripts/tampermonkey-tweet-copy
-// @version      1.2.7
+// @version      1.2.8
 // @description  Adds a "Copy" button to each tweet and article that copies the content along with its URL and shows a check mark animation upon success, preserving link URLs and styling. Quoted tweets are labeled separately instead of being merged with the main tweet.
 // @author       tizee
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=x.com
@@ -230,15 +230,19 @@
         const link = quoteCard.querySelector('a[href*="/status/"]');
         if (link) return link.href;
 
-        const fiberKey = Object.keys(quoteCard).find(k =>
+        // Firefox runs userscripts in a sandbox where DOM nodes are Xray
+        // wrappers that hide page-set expandos such as React's fiber key.
+        // wrappedJSObject waives Xray; it is undefined in page context (Chrome).
+        const pageNode = quoteCard.wrappedJSObject || quoteCard;
+        const fiberKey = Object.keys(pageNode).find(k =>
             k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$'));
         if (!fiberKey) {
-            console.warn('[Tweet Copy] React fiber not reachable; check that the script runs in page context (@sandbox JavaScript).');
+            console.warn('[Tweet Copy] React fiber not reachable from the userscript context.');
             return '';
         }
 
         const mainId = (mainUrl.match(/\/status\/(\d+)/) || [])[1];
-        for (let fiber = quoteCard[fiberKey], depth = 0; fiber && depth < 50; fiber = fiber.return, depth++) {
+        for (let fiber = pageNode[fiberKey], depth = 0; fiber && depth < 50; fiber = fiber.return, depth++) {
             const props = fiber.memoizedProps;
             const link = props?.link;
             const linkUrl = toXUrl(typeof link === 'string' ? link : link?.pathname);
