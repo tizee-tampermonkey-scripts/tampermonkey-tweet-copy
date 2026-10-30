@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         X Tweet Copy
 // @namespace    https://github.com/tizee-tampermonkey-scripts/tampermonkey-tweet-copy
-// @version      1.2.5
+// @version      1.2.6
 // @description  Adds a "Copy" button to each tweet and article that copies the content along with its URL and shows a check mark animation upon success, preserving link URLs and styling. Quoted tweets are labeled separately instead of being merged with the main tweet.
 // @author       tizee
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=x.com
@@ -154,6 +154,39 @@
     }
 
     /**
+     * Extracts the content of a quote card. A quoted tweet exposes tweetText
+     * elements. A quoted long-form article exposes only a title and a
+     * truncated preview as plain dir="auto" blocks without a data-testid.
+     * @param {HTMLElement} quoteCard - The quote card.
+     * @param {HTMLElement[]} quotedTextElements - tweetText elements in the card.
+     * @returns {{kind: string, html: string, text: string}|null}
+     */
+    function extractQuotedContent(quoteCard, quotedTextElements) {
+        if (quotedTextElements.length) {
+            const parts = processTextElements(quotedTextElements);
+            return {
+                kind: 'tweet',
+                html: parts.map(p => p.html).join('<br><br>'),
+                text: parts.map(p => p.text).join('\n\n'),
+            };
+        }
+
+        if (!quoteCard.querySelector('[data-testid="article-cover-image"], [aria-label="Article"]')) {
+            return null;
+        }
+        const blocks = Array.from(quoteCard.querySelectorAll('div[dir="auto"]'))
+            .filter(el => !el.closest('[data-testid="User-Name"]') && el.textContent.trim());
+        if (!blocks.length) return null;
+
+        const [title, ...rest] = processTextElements(blocks);
+        return {
+            kind: 'article',
+            html: [`<strong>${title.html}</strong>`, ...rest.map(p => p.html)].join('<br><br>'),
+            text: [title.text, ...rest.map(p => p.text)].join('\n\n'),
+        };
+    }
+
+    /**
      * Creates and appends a copy button to the button group element.
      * The button, when clicked, copies the tweet content with styling and tweet URL.
      * @param {HTMLElement} groupEl - The container for tweet action buttons.
@@ -301,14 +334,14 @@
             let copyHTML = `<pre><code>${mainHTML}</code></pre>`;
             let copyText = `\`\`\`\n${mainText}\n\`\`\``;
 
-            // Append the quoted tweet as a clearly labeled, separate block.
-            if (quoteCard && quotedTextElements.length) {
-                const quotedContent = processTextElements(quotedTextElements);
-                const quotedHTML = quotedContent.map(obj => obj.html).join('<br><br>');
-                const quotedText = quotedContent.map(obj => obj.text).join('\n\n');
+            // Append the quoted tweet or article as a clearly labeled, separate block.
+            const quoted = quoteCard ? extractQuotedContent(quoteCard, quotedTextElements) : null;
+            if (quoted) {
+                const quotedHTML = quoted.html;
+                const quotedText = quoted.text;
 
                 const quotedHandle = extractHandle(quoteCard.querySelector('[data-testid="User-Name"]'));
-                const quotedLabel = quotedHandle ? `Quoted tweet from ${quotedHandle}` : 'Quoted tweet';
+                const quotedLabel = quotedHandle ? `Quoted ${quoted.kind} from ${quotedHandle}` : `Quoted ${quoted.kind}`;
 
                 // Include the quoted status URL only if X exposes it in the DOM.
                 let quotedUrl = '';
